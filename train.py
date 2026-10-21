@@ -1,25 +1,19 @@
 """
 train.py
 --------
-End-to-end training and evaluation script for PhishGuard.
+Training script for PhishGuard.
 
 Usage:
     python train.py
 
 Pipeline steps:
-1. Loads and validates the UCI Phishing Websites dataset (data/phishing.csv).
-2. Cleans the data (schema check, duplicate detection and removal, type validation).
-3. Splits into training (80%) and independent test (20%) sets using stratified sampling.
-4. Executes 5-fold Stratified Cross-Validation on the training data only.
-5. Trains all four Scikit-Learn pipelines:
-   - Decision Tree (Information Gain / Entropy)
-   - K-Nearest Neighbors (with StandardScaler inside Pipeline)
-   - Random Forest (150 trees)
-   - Support Vector Machine (RBF kernel, StandardScaler, Calibrated probabilities)
-6. Evaluates all models on the held-out test set (Accuracy, Precision, Recall, F1, ROC-AUC).
-7. Selects the best model based on F1-score on the Phishing class (-1).
-8. Persists models to models/*.joblib and metrics/plots to results/.
-9. Extracts verified held-out test samples into data/demo_samples.json for faculty demonstration.
+1. Loads and validates raw URL dataset (data/urls.csv).
+2. Extracts 16 lexical and structural features from raw URLs.
+3. Performs stratified 80/20 train/test split (random_state=42).
+4. Runs 5-fold Stratified Cross-Validation on training data only.
+5. Trains four comparative models: Random Forest, Decision Tree, KNN, SVM.
+6. Evaluates on independent test set and selects the optimal model.
+7. Persists fitted model pipelines to models/ and metrics to results/.
 """
 
 from __future__ import annotations
@@ -29,218 +23,137 @@ import logging
 import sys
 from pathlib import Path
 
-# Resolve project root
-PROJECT_ROOT = Path(__file__).resolve().parent
-DATA_PATH = PROJECT_ROOT / "data" / "phishing.csv"
-MODELS_DIR = PROJECT_ROOT / "models"
-RESULTS_DIR = PROJECT_ROOT / "results"
-DEMO_SAMPLES_PATH = PROJECT_ROOT / "data" / "demo_samples.json"
+import pandas as pd
 
+PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data_cleaning import (
-    FEATURE_COLUMNS,
-    TARGET_COLUMN,
-    clean_dataset,
-    load_dataset,
-    split_data,
+from src.data_loader import get_dataset_summary, load_dataset
+from src.model_pipeline import (
+    build_model_pipelines,
+    run_cross_validation,
+    train_and_select_best,
 )
-from src.evaluation import (
-    plot_confusion_matrices,
-    plot_feature_importance,
-    plot_performance_comparison,
-    plot_roc_curves,
-    save_comparison_csv,
-    save_experiment_summary,
-)
-from src.train_models import (
-    build_pipelines,
-    perform_cross_validation,
-    train_and_evaluate_all,
-)
+from src.preprocessing import extract_dataset_features, split_data
+
+DATA_PATH = PROJECT_ROOT / "data" / "urls.csv"
+MODELS_DIR = PROJECT_ROOT / "models"
+RESULTS_DIR = PROJECT_ROOT / "results"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("train")
 
-RANDOM_STATE = 42
 
-
-def generate_demo_samples(X_test, y_test, pipelines, out_path: Path) -> None:
-    """Extract verified legitimate and phishing examples from the held-out test set."""
-    # Find indices for legitimate (1) and phishing (-1)
-    legit_indices = y_test[y_test == 1].index.tolist()
-    phish_indices = y_test[y_test == -1].index.tolist()
-
-    best_pipeline = pipelines.get("Decision Tree") or list(pipelines.values())[0]
-
-    samples = {
-        "legitimate_samples": [],
-        "phishing_samples": [],
-        "tested_urls": [
-            {
-                "url": "https://www.google.com",
-                "expected_type": "Legitimate popular service",
-                "note": "Lexical heuristics only. Live page attributes (PageRank, DNS, Traffic) are approximated offline.",
-            },
-            {
-                "url": "http://192.168.1.100/paypal-update/login.php",
-                "expected_type": "Phishing pattern",
-                "note": "Contains raw IP address, target keyword in path, and suspicious sub-domain structure.",
-            },
-            {
-                "url": "https://secure-login-account-verification-alert.com/signin",
-                "expected_type": "Phishing pattern",
-                "note": "Domain uses hyphenated deceptive brand keywords with long path.",
-            },
-            {
-                "url": "http://user@evil-phishing-bank.net/auth",
-                "expected_type": "Phishing pattern",
-                "note": "Uses '@' credential spoofing symbol in authority section.",
-            },
-        ],
-    }
-
-    # Extract 3 verified legitimate test samples
-    for i, idx in enumerate(legit_indices[:3], 1):
-        features_row = X_test.loc[idx].to_dict()
-        pred = int(best_pipeline.predict(X_test.loc[[idx]])[0])
-        samples["legitimate_samples"].append({
-            "id": f"legit_sample_{i}",
-            "description": f"Verified Held-out Test Sample #{i} (Ground Truth: Legitimate)",
-            "ground_truth": 1,
-            "ground_truth_label": "Likely Legitimate",
-            "model_prediction": pred,
-            "features": features_row,
-        })
-
-    # Extract 3 verified phishing test samples
-    for i, idx in enumerate(phish_indices[:3], 1):
-        features_row = X_test.loc[idx].to_dict()
-        pred = int(best_pipeline.predict(X_test.loc[[idx]])[0])
-        samples["phishing_samples"].append({
-            "id": f"phish_sample_{i}",
-            "description": f"Verified Held-out Test Sample #{i} (Ground Truth: Phishing)",
-            "ground_truth": -1,
-            "ground_truth_label": "Potentially Phishing",
-            "model_prediction": pred,
-            "features": features_row,
-        })
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as fh:
-        json.dump(samples, fh, indent=2)
-    logger.info("Saved %d demo test fixtures to '%s'", len(samples["legitimate_samples"]) + len(samples["phishing_samples"]), out_path)
-
-
-def main() -> None:
-    logger.info("=" * 65)
-    logger.info("PhishGuard — Reproducible Training and Evaluation Pipeline")
-    logger.info("=" * 65)
+def train_pipeline() -> dict:
+    """Execute the complete training and evaluation pipeline."""
+    print("=" * 68)
+    print("                PHISHGUARD MODEL TRAINING PIPELINE")
+    print("=" * 68)
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. Load dataset
-    logger.info("Step 1: Loading dataset from '%s' ...", DATA_PATH)
-    try:
-        df = load_dataset(DATA_PATH)
-    except FileNotFoundError as exc:
-        logger.error("%s", exc)
-        sys.exit(1)
+    print(f"\n[1/5] Loading and validating dataset from '{DATA_PATH.relative_to(PROJECT_ROOT)}' ...")
+    df = load_dataset(DATA_PATH)
+    summary = get_dataset_summary(df)
+    print(f"      Total URLs: {summary['total_instances']:,}")
+    print(f"      Legitimate: {summary['legitimate_instances']:,} ({summary['legitimate_percentage']}%)")
+    print(f"      Phishing  : {summary['phishing_instances']:,} ({summary['phishing_percentage']}%)")
 
-    # 2. Clean dataset
-    logger.info("Step 2: Cleaning dataset & checking schema ...")
-    X, y, cleaning_summary = clean_dataset(df, results_dir=RESULTS_DIR)
-    logger.info(
-        "  Cleaned dataset: %d rows x %d features", len(X), X.shape[1]
-    )
-    logger.info(
-        "  Class balance: Phishing (-1) = %d (%.2f%%) | Legitimate (1) = %d (%.2f%%)",
-        cleaning_summary["class_distribution"]["Phishing (−1)"],
-        cleaning_summary["class_balance_pct"]["Phishing (−1)"],
-        cleaning_summary["class_distribution"]["Legitimate (1)"],
-        cleaning_summary["class_balance_pct"]["Legitimate (1)"],
-    )
+    # 2. Extract features
+    print("\n[2/5] Extracting 16 lexical & structural URL features ...")
+    X, y = extract_dataset_features(df)
+    print(f"      Extracted feature matrix: {X.shape[0]:,} rows x {X.shape[1]} features")
 
-    # 3. Train / test split (80 / 20 stratified)
-    logger.info("Step 3: Performing stratified 80/20 train/test split ...")
-    X_train, X_test, y_train, y_test = split_data(
-        X, y, test_size=0.20, random_state=RANDOM_STATE
-    )
-    logger.info("  Training instances: %d | Held-out Test instances: %d", len(X_train), len(X_test))
+    # 3. Train/test split
+    print("\n[3/5] Performing stratified 80/20 train/test split (random_state=42) ...")
+    X_train, X_test, y_train, y_test = split_data(X, y, test_size=0.20, random_state=42)
+    print(f"      Training set: {len(X_train):,} samples")
+    print(f"      Held-out test set: {len(X_test):,} samples (strictly independent)")
 
-    # Persist dataset info
-    dataset_info = {
-        **cleaning_summary,
-        "train_size": len(X_train),
-        "test_size": len(X_test),
-        "random_state": RANDOM_STATE,
-        "test_split_ratio": 0.20,
+    # 4. Cross-validation
+    print("\n[4/5] Running 5-fold Stratified Cross-Validation on X_train ...")
+    pipelines = build_model_pipelines(random_state=42)
+    cv_summary = run_cross_validation(pipelines, X_train, y_train, n_splits=5, random_state=42)
+
+    for m_name, cv_s in cv_summary.items():
+        print(f"      {m_name:24s} | CV F1: {cv_s['cv_f1_mean']:.4f} (±{cv_s['cv_f1_std']:.4f}) | CV Acc: {cv_s['cv_accuracy_mean']:.4f}")
+
+    # 5. Fit on X_train, evaluate on held-out X_test, save models
+    print("\n[5/5] Training pipelines and evaluating on independent test set ...")
+    results, best = train_and_select_best(pipelines, X_train, y_train, X_test, y_test, MODELS_DIR)
+
+    # 6. Save results
+    comparison_rows = []
+    cm_rows = []
+    for r in results:
+        comparison_rows.append({
+            "Model": r["name"],
+            "Accuracy": r["accuracy"],
+            "Precision": r["precision"],
+            "Recall": r["recall"],
+            "F1-Score": r["f1"],
+            "ROC-AUC": r["roc_auc"] if r["roc_auc"] is not None else "N/A",
+            "FPR": r["fpr"],
+            "FNR": r["fnr"],
+            "Training Time (s)": r["training_time_s"],
+        })
+        cm = r["confusion_matrix"]
+        cm_rows.append({
+            "Model": r["name"],
+            "True Negatives (TN)": cm["tn"],
+            "False Positives (FP)": cm["fp"],
+            "False Negatives (FN)": cm["fn"],
+            "True Positives (TP)": cm["tp"],
+        })
+
+    comp_df = pd.DataFrame(comparison_rows)
+    comp_df.to_csv(RESULTS_DIR / "model_comparison.csv", index=False)
+
+    cm_df = pd.DataFrame(cm_rows)
+    cm_df.to_csv(RESULTS_DIR / "confusion_matrix.csv", index=False)
+
+    metrics_payload = {
+        "dataset_summary": summary,
+        "split_config": {"train_samples": len(X_train), "test_samples": len(X_test), "random_state": 42},
+        "cross_validation": cv_summary,
+        "test_results": {r["name"]: {k: v for k, v in r.items() if k != "pipeline"} for r in results},
+        "selected_model": {
+            "name": best["name"],
+            "accuracy": best["accuracy"],
+            "precision": best["precision"],
+            "recall": best["recall"],
+            "f1": best["f1"],
+            "roc_auc": best["roc_auc"],
+            "fpr": best["fpr"],
+            "fnr": best["fnr"],
+            "artifact": "models/best_model.joblib",
+        },
     }
-    with open(RESULTS_DIR / "dataset_info.json", "w") as fh:
-        json.dump(dataset_info, fh, indent=2)
+    with open(RESULTS_DIR / "metrics.json", "w") as fh:
+        json.dump(metrics_payload, fh, indent=2)
 
-    # 4. Build pipelines
-    pipelines = build_pipelines(random_state=RANDOM_STATE)
+    print("\n" + "=" * 68)
+    print("                    INDEPENDENT TEST SET RESULTS")
+    print("=" * 68)
+    print(comp_df.to_string(index=False))
+    print("=" * 68)
+    print(f"SELECTED PRODUCTION MODEL: {best['name']}")
+    print(f"  Test Accuracy : {best['accuracy']:.4f}")
+    print(f"  Test Recall   : {best['recall']:.4f} (Phishing Detection Rate)")
+    print(f"  Test Precision: {best['precision']:.4f}")
+    print(f"  Test F1-Score : {best['f1']:.4f}")
+    print(f"  Test ROC-AUC  : {best['roc_auc']:.4f}")
+    print(f"  Saved To      : models/best_model.joblib")
+    print("=" * 68 + "\n")
 
-    # 5. Cross-Validation on X_train only
-    logger.info("Step 4: Running 5-fold Stratified Cross-Validation on X_train ...")
-    cv_summary = perform_cross_validation(
-        pipelines=pipelines,
-        X_train=X_train,
-        y_train=y_train,
-        n_splits=5,
-        random_state=RANDOM_STATE,
-    )
-
-    # 6. Fit and evaluate on held-out test set
-    logger.info("Step 5: Training pipelines and evaluating on independent test set ...")
-    results, best_model = train_and_evaluate_all(
-        pipelines=pipelines,
-        X_train=X_train,
-        y_train=y_train,
-        X_test=X_test,
-        y_test=y_test,
-        models_dir=MODELS_DIR,
-    )
-
-    # 7. Generate plots and persistence artifacts
-    logger.info("Step 6: Generating evaluation plots and summaries ...")
-    save_comparison_csv(results, RESULTS_DIR)
-    plot_confusion_matrices(results, y_test, RESULTS_DIR)
-    plot_roc_curves(results, y_test, RESULTS_DIR)
-    plot_performance_comparison(results, RESULTS_DIR)
-    plot_feature_importance(pipelines, list(FEATURE_COLUMNS), RESULTS_DIR)
-
-    save_experiment_summary(
-        results=results,
-        best_model=best_model,
-        dataset_info=dataset_info,
-        cv_summary=cv_summary,
-        results_dir=RESULTS_DIR,
-    )
-
-    # 8. Generate demonstration fixtures
-    logger.info("Step 7: Creating verified demo fixtures from held-out test set ...")
-    generate_demo_samples(X_test, y_test, pipelines, DEMO_SAMPLES_PATH)
-
-    logger.info("=" * 65)
-    logger.info("TRAINING PIPELINE COMPLETE")
-    logger.info("=" * 65)
-    logger.info("Selected Best Model: %s", best_model["name"])
-    logger.info("  Test Accuracy : %.4f", best_model["accuracy"])
-    logger.info("  Test Precision: %.4f", best_model["precision"])
-    logger.info("  Test Recall   : %.4f", best_model["recall"])
-    logger.info("  Test F1-Score : %.4f", best_model["f1"])
-    logger.info("  Test ROC-AUC  : %s", f"{best_model['roc_auc']:.4f}" if best_model["roc_auc"] else "N/A")
-    logger.info("  Training Time : %.4f s", best_model["training_time_s"])
-    logger.info("Artifacts saved to: %s and %s", MODELS_DIR, RESULTS_DIR)
-    logger.info("=" * 65)
+    return metrics_payload
 
 
 if __name__ == "__main__":
-    main()
+    train_pipeline()

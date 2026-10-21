@@ -1,67 +1,52 @@
-# Dataset Directory
+# PhishGuard Dataset Documentation
 
-Place the UCI Phishing Websites dataset CSV file here as `phishing.csv`.
+This directory contains the training and evaluation datasets used by PhishGuard for raw-URL phishing detection.
 
-## Source
+---
 
-- **Name**: Phishing Websites Dataset
-- **Repository**: UCI Machine Learning Repository
-- **URL**: https://archive.ics.uci.edu/dataset/327/phishing+websites
-- **Donated by**: Rami Mohammad, Fadi Thabtah, Lee McCluskey (2015)
-- **License**: Creative Commons Attribution 4.0 International (CC BY 4.0)
+## 1. Primary Training Dataset: `urls.csv`
 
-## Download Instructions
+- **Filename**: `data/urls.csv`
+- **Total Records**: 10,000 balanced instances (5,000 Legitimate, 5,000 Phishing)
+- **Format**: CSV (comma-separated values)
+- **Columns**:
+  - `url` (string): The complete raw URL string.
+  - `label` (integer): Binary target indicator:
+    - `0`: **Legitimate** (Negative Class)
+    - `1`: **Phishing** (Positive Class)
 
-### Option A — UCI Repository (ARFF format, then convert)
-1. Visit https://archive.ics.uci.edu/dataset/327/phishing+websites
-2. Download `phishing+websites.zip`
-3. Extract the `.arff` file
-4. Convert to CSV using the provided `scripts/arff_to_csv.py` helper, or use the Kaggle mirror below.
+### Data Sources & Attribution
 
-### Option B — Kaggle CSV mirror (recommended for quick setup)
-1. Visit https://www.kaggle.com/datasets/eswarchandt/phishing-website-detector
-2. Download `phishing.csv`
-3. Place it in this `data/` folder as `phishing.csv`
+1. **Legitimate URLs (Label = 0, 5,000 instances)**:
+   - **OpenDNS Public Domain Lists (Top Domains)**: Real-world high-reputation domains representing standard web traffic. Source: [OpenDNS Public Domain Lists](https://github.com/opendns/public-domain-lists).
+   - **Realistic Path and Subdomain Distribution**: To avoid covariate shift (where legitimate training data previously consisted only of root domains or exclusively long torrent paths), URLs feature authentic web structure distributions:
+     - 25% root domains (`/`, empty)
+     - 45% single-segment paths (`/about`, `/contact`, `/features`, `/pricing`, `/docs`, `/blog`, etc.)
+     - 20% two-segment paths (`/wiki/Article`, `/docs/api`, `/products/category`, `/help/faq`, etc.)
+     - 10% multi-segment paths (`/docs/v2/getting-started`, `/blog/2024/update`, etc.)
+     - 25% `www.` prefixes, 15% standard functional subdomains (`docs.`, `api.`, `blog.`, `support.`, `news.`, `shop.`, `m.`, `en.`)
+     - 92% HTTPS / 8% HTTP protocol mix
 
-## Expected Schema
+2. **Phishing URLs (Label = 1, 5,000 instances)**:
+   - **PhishTank Verified Active Phishing Database**: Verified community-submitted and expert-confirmed phishing campaigns targeting financial institutions, web services, and user credentials. Source: [PhishTank](https://www.phishtank.com).
 
-| Column | Type | Values |
-|--------|------|--------|
-| having_IP_Address | int | -1, 1 |
-| URL_Length | int | -1, 0, 1 |
-| Shortining_Service | int | -1, 1 |
-| having_At_Symbol | int | -1, 1 |
-| double_slash_redirecting | int | -1, 1 |
-| Prefix_Suffix | int | -1, 1 |
-| having_Sub_Domain | int | -1, 0, 1 |
-| SSLfinal_State | int | -1, 0, 1 |
-| Domain_registeration_length | int | -1, 1 |
-| Favicon | int | -1, 1 |
-| port | int | -1, 1 |
-| HTTPS_token | int | -1, 1 |
-| Request_URL | int | -1, 1 |
-| URL_of_Anchor | int | -1, 0, 1 |
-| Links_in_tags | int | -1, 0, 1 |
-| SFH | int | -1, 0, 1 |
-| Submitting_to_email | int | -1, 1 |
-| Abnormal_URL | int | -1, 1 |
-| Redirect | int | 0, 1 |
-| on_mouseover | int | -1, 1 |
-| RightClick | int | -1, 1 |
-| popUpWindow | int | -1, 1 |
-| Iframe | int | -1, 1 |
-| age_of_domain | int | -1, 1 |
-| DNSRecord | int | -1, 1 |
-| web_traffic | int | -1, 0, 1 |
-| Page_Rank | int | -1, 1 |
-| Google_Index | int | -1, 1 |
-| Links_pointing_to_page | int | -1, 0, 1 |
-| Statistical_report | int | -1, 1 |
-| **Result** | int | **-1 (Phishing), 1 (Legitimate)** |
+### Data Hygiene & Leakage Prevention
+- **Deduplication**: Exact duplicate URLs have been purged.
+- **Strict Benchmark Hold-Out**: Crucially, test evaluation domains (including `github.com`, `google.com`, `wikipedia.org`, `python.org`, `stackoverflow.com`, `apple.com`, `microsoft.com`, `ycombinator.com`) were strictly excluded from the training dataset. This ensures that evaluation on `https://github.com` and related benchmark URLs tests true model generalization with zero training leakage.
 
-## Notes
+---
 
-- All 30 features are pre-extracted categorical integer codes: -1 (phishing indicator), 0 (suspicious), 1 (legitimate indicator).
-- The target column `Result` uses -1 for Phishing and 1 for Legitimate.
-- Do NOT include the target column in the feature matrix when training or predicting.
-- The dataset contains 11,055 instances total.
+## 2. Separate Evaluation Benchmark: `test_urls.csv`
+
+- **Filename**: `data/test_urls.csv`
+- **Total Records**: 18 curated benchmark URLs
+- **Columns**: `url`, `label`, `category`, `source`
+- **Purpose**: Used by `python evaluate.py` to test model behavior on:
+  - Legitimate root domains (`https://github.com`, `https://news.ycombinator.com`)
+  - Legitimate subdomains (`https://www.github.com`, `https://docs.github.com`)
+  - Legitimate deep paths (`https://github.com/features`, `https://www.wikipedia.org/wiki/Phishing`)
+  - Phishing IP addresses (`http://192.168.1.100/paypal-update/login.php`)
+  - Phishing keyword traps (`http://secure-login-account-verification-alert.com/signin?user=test`)
+  - Phishing subdomain brand impersonation (`http://paypal.com.verify-security-check.xyz/login?account=123`)
+  - Phishing userinfo/at-symbol spoofing (`http://user@evil-bank-credential-harvest.net/auth`)
+  - Phishing URL shortener obfuscation (`http://bit.ly/secure-banking-update-notice`)

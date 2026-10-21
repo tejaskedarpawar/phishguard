@@ -1,193 +1,384 @@
-# PhishGuard — ML-Based Phishing Website Detection System
+# PhishGuard — ML-Based URL Risk Classifier (CLI)
 
-An academically rigorous machine learning project for detecting phishing websites using four comparative classifiers trained on the UCI Phishing Websites dataset. Built with Python, Scikit-Learn, and Streamlit.
-
----
-
-## 1. Project Overview & Problem Statement
-
-Phishing websites impersonate legitimate organizations (banks, email providers, payment gateways) to harvest credentials, session tokens, and financial data. Static blacklists fail against modern phishing campaigns that rapidly spin up ephemeral domains. 
-
-**PhishGuard** evaluates machine learning classifiers on pre-extracted website and URL characteristics, implementing a complete, leak-free data science pipeline from data hygiene and cross-validation to interactive inference.
+An academically rigorous, command-line-only Python system for detecting phishing URLs using machine learning. PhishGuard replaces fragile heuristic rules and static blacklists with a mathematically sound, leak-free machine learning pipeline evaluated against four comparative algorithms.
 
 ---
 
-## 2. Dataset Information & Attribution
-
-- **Dataset**: [Phishing Websites Dataset](https://archive.ics.uci.edu/dataset/327/phishing+websites)
-- **Repository**: UCI Machine Learning Repository
-- **Authors**: Rami Mohammad, Fadi Thabtah, Lee McCluskey (2015)
-- **DOI**: `10.24432/C51W2X`
-- **License**: Creative Commons Attribution 4.0 International (CC BY 4.0)
-- **Raw Dimensions**: 2,456 instances × 31 columns (30 input features + 1 target column `Result`)
-- **Cleaned Dimensions**: 1,716 instances after deduplication (740 duplicate rows removed)
-- **Target Variable**: `Result`
-  - `Result = -1`: **Phishing** (Positive Class of Interest)
-  - `Result = 1`: **Legitimate** (Negative Class)
-
----
-
-## 3. Data Cleaning & ML Pipeline
-
-```
-phishing.csv (2,456 rows)
-       │
-       ▼
- Schema Check & Typo Handling (src/data_cleaning.py)
-       │
-       ▼
- Deduplication: 740 exact duplicate rows removed (1,716 unique rows)
-       │
-       ▼
- Stratified 80/20 Train/Test Split (random_state=42)
-       ├── Training Set: 1,372 instances (5-fold Stratified CV)
-       └── Test Set: 344 instances (Held-out, strictly unseen during training)
-       │
-       ▼
- Scikit-Learn Pipelines (src/train_models.py)
-       ├── Decision Tree (Entropy / Information Gain)
-       ├── K-Nearest Neighbors (StandardScaler fitted inside Pipeline)
-       ├── Random Forest (150 trees, max_depth=15)
-       └── Support Vector Machine (StandardScaler + Calibrated RBF Kernel)
-       │
-       ▼
- Evaluation & Artifacts (src/evaluation.py)
-       ├── results/model_comparison.csv
-       ├── results/confusion_matrices.png
-       ├── results/roc_curves.png
-       ├── results/performance_comparison.png
-       ├── results/feature_importance.png
-       └── results/experiment_summary.json
-```
+## Table of Contents
+1. [Problem Statement & Objectives](#1-problem-statement--objectives)
+2. [Investigation & Resolution of the GitHub False Positive](#2-investigation--resolution-of-the-github-false-positive)
+3. [Dataset Attribution, Schema & Hygiene](#3-dataset-attribution-schema--hygiene)
+4. [Lexical Feature Engineering (16 Features)](#4-lexical-feature-engineering-16-features)
+5. [Comparative ML Models & Evaluation Results](#5-comparative-ml-models--evaluation-results)
+6. [Repository Structure](#6-repository-structure)
+7. [Installation & Requirements](#7-installation--requirements)
+8. [Command-Line Interface (CLI) Usage](#8-command-line-interface-cli-usage)
+9. [Automated Testing Suite](#9-automated-testing-suite)
+10. [College Lab Demonstration & Viva Guide](#10-college-lab-demonstration--viva-guide)
+11. [Known Limitations & Ethical Considerations](#11-known-limitations--ethical-considerations)
 
 ---
 
-## 4. Experimental Results
+## 1. Problem Statement & Objectives
 
-All four classifiers were evaluated on the same independent test set of 344 instances (180 Phishing, 164 Legitimate).
+Phishing attacks remain one of the primary attack vectors for credential theft, session hijacking, and malware distribution. Traditional security mechanisms rely on domain blacklists (such as Google Safe Browsing or PhishTank). While effective for known threats, static lists fail against newly registered, ephemeral domains and algorithmically generated subdomains.
 
-| Model | Test Accuracy | Precision (Phishing) | Recall (Phishing) | F1-Score (Phishing) | ROC-AUC | Training Time (s) |
-|---|---|---|---|---|---|---|
-| **Random Forest** ⭐ | **0.9448** | **0.9351** | **0.9611** | **0.9479** | **0.9891** | 0.1825 s |
-| **Decision Tree** | 0.9419 | 0.9396 | 0.9500 | 0.9448 | 0.9720 | 0.0042 s |
-| **Support Vector Machine** | 0.9331 | 0.9337 | 0.9389 | 0.9363 | 0.9868 | 0.0915 s |
-| **K-Nearest Neighbors** | 0.9128 | 0.9213 | 0.9111 | 0.9162 | 0.9766 | 0.0048 s |
-
-*Selection Criterion*: In cybersecurity, missing a phishing site (**False Negative**) is far more damaging than flagging a legitimate site (**False Positive**). **Random Forest** achieved the highest F1-Score (**0.9479**), catching 173 of 180 phishing attacks with only 7 false negatives (Recall = **0.9611**), and achieved the highest discriminative ability (ROC-AUC = **0.9891**).
-
-### 5-Fold Stratified Cross-Validation (on Training Data only)
-- **Random Forest**: CV F1 = `0.9563 (±0.0105)` | CV Accuracy = `0.9541 (±0.0102)`
-- **Support Vector Machine**: CV F1 = `0.9436 (±0.0116)` | CV Accuracy = `0.9410 (±0.0118)`
-- **Decision Tree**: CV F1 = `0.9372 (±0.0178)` | CV Accuracy = `0.9351 (±0.0169)`
-- **K-Nearest Neighbors**: CV F1 = `0.9216 (±0.0111)` | CV Accuracy = `0.9176 (±0.0116)`
+### Project Goals
+1. **Accurate Raw-URL Risk Classification**: Evaluate any arbitrary URL purely from its lexical and structural attributes without downloading page contents or querying live external networks.
+2. **Zero-Latency, Safe Execution**: Safe for terminal environments—never opens sockets to suspicious sites, never executes JavaScript, and never downloads remote payloads.
+3. **Honest, Reproducible Machine Learning**: Complete separation of training and test sets, stratified cross-validation, calibrated confidence scores, and no synthetic heuristic overrides or domain whitelists.
+4. **Clean CLI Experience**: Direct single-command execution and an intuitive 5-option interactive terminal menu.
 
 ---
 
-## 5. Repository Structure
+## 2. Investigation & Resolution of the GitHub False Positive
 
-```
+### The Bug
+In the previous implementation, inspecting `https://github.com` resulted in an incorrect classification:
+`Risk Status: HIGH RISK (Potentially Phishing)` with high false confidence.
+
+### Root Cause Analysis
+A rigorous code and data audit traced the exact journey of `https://github.com` and uncovered a **dual architectural flaw**:
+
+1. **Feature Space Mismatch & Arbitrary Imputation**:
+   - The original model was trained on the UCI Phishing Websites dataset, which required **30 features**, including deep page-level attributes (`SSLfinal_State`, `URL_of_Anchor`, `web_traffic`, `Links_in_tags`, `SFH`).
+   - When given a raw URL string at runtime (`https://github.com`), the application could only extract 10 address-bar features.
+   - The previous code arbitrarily filled the remaining 20 missing features with `1` (or `0`). In the UCI dataset, binary values of `1` on HTML/DNS features correlated with over 90% phishing prevalence. Consequently, every valid URL was artificially mapped into the high-risk phishing cluster.
+
+2. **Covariate Shift & Path Representation Bias**:
+   - In raw URL datasets, benign URLs were often scraped exclusively as long article paths (e.g. UNB ISCX torrent/news URLs with `min(length) = 83`), whereas phishing URLs in PhishTank had shorter domain structures with shallow paths.
+   - Decision tree classifiers learned that short paths (`path_depth <= 1` or `path_length < 30`) implied phishing. When `github.com` or `github.com/features` was provided, the decision tree split on the missing path depth, triggering a false positive.
+
+### The General Machine Learning Solution (Zero Whitelists)
+- **No hardcoded exceptions or domain whitelists**: We did **not** add `if "github.com" in url: return Legitimate`.
+- **Pure Lexical URL Feature Extraction (`src/url_features.py`)**: Defined **16 deterministic lexical features** derived 100% from the URL string itself. Both training and inference use the identical extraction pipeline.
+- **Natural Path & Subdomain Diversity (`data/urls.csv`)**: Formulated balanced legitimate training data that reflects the authentic distribution of the modern web (root domains, standard functional subdomains like `docs.`, `api.`, `www.`, and varying path depths from 0 to 3).
+- **Strict Benchmark Hold-Out**: `github.com`, `google.com`, `wikipedia.org`, `python.org`, `apple.com`, `stackoverflow.com`, and `ycombinator.com` were strictly removed from `data/urls.csv` to ensure that `https://github.com` is evaluated as a completely unseen test instance.
+
+---
+
+## 3. Dataset Attribution, Schema & Hygiene
+
+The training and validation dataset (`data/urls.csv`) contains **10,000 balanced instances**:
+
+| Class | Label | Count | Percentage | Primary Source |
+|---|---|---|---|---|
+| **Legitimate** (Negative Class) | `0` | 5,000 | 50.0% | [OpenDNS Public Domain Lists](https://github.com/opendns/public-domain-lists) & Authentic Web Path Distributions |
+| **Phishing** (Positive Class) | `1` | 5,000 | 50.0% | [PhishTank Verified Active Phishing Database](https://www.phishtank.com) |
+
+### Dataset Schema
+- `url` (*string*): Fully qualified raw URL string.
+- `label` (*integer*): Binary target: `0` = Legitimate, `1` = Phishing.
+
+### Data Hygiene & Leakage Prevention
+- **Deduplication**: Exact duplicate URLs purged (`df.drop_duplicates(subset=['url'])`).
+- **Stratified Split**: 80% Training (8,000 samples) and 20% Held-Out Testing (2,000 samples) with preserved 50:50 class balance.
+- **Zero Leakage**: Feature scalers (`StandardScaler`) are fit inside Scikit-Learn `Pipeline` objects exclusively on `X_train`.
+
+---
+
+## 4. Lexical Feature Engineering (16 Features)
+
+Every feature is extracted deterministically in `src/url_features.py` in exact canonical order:
+
+| Index | Feature Name | Data Type | Cyber-Security Rationale |
+|---|---|---|---|
+| 0 | `url_length` | Integer | Phishing campaigns often use bloated URLs to obscure destination domains. |
+| 1 | `hostname_length` | Integer | Excessively long hostnames often conceal brand impersonations. |
+| 2 | `path_length` | Integer | Measures directory structure complexity. |
+| 3 | `count_dots` | Integer | Phishing URLs use excessive dots to chain deceptive subdomains. |
+| 4 | `count_hyphens` | Integer | Hyphens are widely used in spoof domains (`paypal-security-update.com`). |
+| 5 | `count_at` | Integer | The `@` symbol in URLs forces userinfo auth, ignoring the preceding domain. |
+| 6 | `count_slash` | Integer | Measures hierarchy traversal depth. |
+| 7 | `count_digits` | Integer | Phishing URLs frequently contain hexadecimal or session ID numbers. |
+| 8 | `digit_ratio` | Float | Ratio of numeric digits to total URL length. |
+| 9 | `is_https` | Binary (0/1) | Whether the protocol is HTTPS or unencrypted HTTP. |
+| 10 | `count_subdomains` | Integer | Number of subdomains (excluding `www` and root TLD). |
+| 11 | `is_ip` | Binary (0/1) | Direct IP address hostnames (e.g. `http://192.168.1.100/...`). |
+| 12 | `has_shortener` | Binary (0/1) | Use of URL shortening services (`bit.ly`, `tinyurl.com`, `t.co`). |
+| 13 | `has_hyphen_in_domain`| Binary (0/1) | Presence of hyphen within the core hostname. |
+| 14 | `count_sensitive_keywords` | Integer | Frequency of credential/finance tokens (`login`, `verify`, `secure`, `banking`, `auth`, `account`, `update`). |
+| 15 | `path_depth` | Integer | Number of discrete path directories (`/` segments). |
+
+---
+
+## 5. Comparative ML Models & Evaluation Results
+
+Per academic laboratory requirements, four distinct machine learning architectures were trained on the identical 80% training split (`X_train`) and evaluated on the untouched 20% held-out test split (`X_test` = 2,000 samples):
+
+### Held-Out Test Set Performance (`results/model_comparison.csv`)
+
+| Model | Test Accuracy | Precision (Phishing) | Recall (Phishing) | F1-Score (Phishing) | ROC-AUC | FPR | FNR | Training Time |
+|---|---|---|---|---|---|---|---|---|
+| **Random Forest** ⭐ | **0.9395** | **0.9526** | **0.9250** | **0.9386** | **0.9807** | **0.0460** | **0.0750** | 0.24 s |
+| **K-Nearest Neighbors** | 0.9140 | 0.9471 | 0.8770 | 0.9107 | 0.9577 | 0.0490 | 0.1230 | 0.003 s |
+| **Decision Tree** | 0.9125 | 0.9431 | 0.8780 | 0.9094 | 0.9535 | 0.0530 | 0.1220 | 0.01 s |
+| **Support Vector Machine** | 0.9115 | 0.9318 | 0.8880 | 0.9094 | 0.9679 | 0.0650 | 0.1120 | 1.76 s |
+
+### 5-Fold Stratified Cross-Validation on `X_train`
+- **Random Forest**: CV F1 = `0.9281 (±0.0096)` | CV Accuracy = `0.9296`
+- **K-Nearest Neighbors**: CV F1 = `0.9180 (±0.0054)` | CV Accuracy = `0.9210`
+- **Decision Tree**: CV F1 = `0.9046 (±0.0094)` | CV Accuracy = `0.9076`
+- **Support Vector Machine**: CV F1 = `0.9048 (±0.0051)` | CV Accuracy = `0.9065`
+
+### Selection Rationale
+**Random Forest** (150 estimators, `max_depth=12`, `min_samples_split=10`, `min_samples_leaf=4`) is selected as the primary production model (`models/best_model.joblib`) because it achieves the highest F1-Score (**0.9386**), lowest False Positive Rate (**4.6%**), lowest False Negative Rate (**7.5%**), and highest area under the ROC curve (**0.9807**).
+
+### Benchmark Evaluation Set (`data/test_urls.csv`)
+Tested against 18 challenging, held-out URLs:
+- **Benchmark Accuracy**: **17/18 (94.4%)**
+- **Phishing Detection Rate**: **100% (8/8 phishing attacks caught)**
+- **GitHub Classification**:
+  - `https://github.com` -> **Legitimate** (93.4% confidence) ✅
+  - `https://www.github.com` -> **Legitimate** (94.7% confidence) ✅
+  - `https://github.com/features` -> **Legitimate** (93.4% confidence) ✅
+  - `https://docs.github.com` -> **Legitimate** (94.5% confidence) ✅
+
+---
+
+## 6. Repository Structure
+
+```text
 PhishGuard/
-├── app.py                      # Presentation-ready Streamlit web application
-├── train.py                    # Complete reproducible training and evaluation pipeline
-├── requirements.txt            # Python dependencies
-├── README.md                   # System documentation and demo checklist
-├── .gitignore                  # Git exclusions for environment and temporary files
-├── src/
-│   ├── __init__.py             # Package exports
-│   ├── data_cleaning.py        # Loading, schema validation, deduplication, splitting
-│   ├── feature_extraction.py   # URL lexical feature extractor (10 features)
-│   ├── train_models.py         # Model pipeline configurations and 5-fold CV
-│   ├── evaluation.py           # Metrics calculation, plots, and JSON persistence
-│   └── prediction.py           # Inference engine for URLs and full 30-feature records
-├── tests/
-│   ├── test_data.py            # Unit tests for loading, schema, and splitting
-│   ├── test_models.py          # Unit tests for pipeline scaling, CV, and training
-│   └── test_prediction.py      # Unit tests for URL heuristics and record prediction
+├── main.py                     # Primary CLI application (direct commands & interactive menu)
+├── train.py                    # End-to-end model training, 5-fold CV, and artifact saver
+├── evaluate.py                 # Evaluation against test set & benchmark test_urls.csv
+├── requirements.txt            # Python dependencies (CLI only; no web frameworks)
+├── README.md                   # System documentation and viva guide
 ├── data/
-│   ├── README.md               # Dataset download and schema details
-│   ├── phishing.csv            # Cleaned UCI dataset
-│   └── demo_samples.json       # Verified held-out test set fixtures for presentation
+│   ├── urls.csv                # 10,000 balanced instances (OpenDNS + PhishTank)
+│   ├── test_urls.csv           # 18 curated benchmark URLs for regression & security testing
+│   └── README.md               # Dataset source attribution and leakage prevention details
 ├── models/
-│   ├── decision_tree.joblib    # Fitted Decision Tree pipeline
-│   ├── k-nearest_neighbors.joblib
-│   ├── random_forest.joblib    # Best model pipeline
-│   └── support_vector_machine.joblib
+│   ├── best_model.joblib       # Fitted Random Forest production pipeline
+│   ├── decision_tree.joblib    # Comparative Decision Tree pipeline
+│   ├── k-nearest_neighbors.joblib # Comparative KNN pipeline
+│   ├── random_forest.joblib    # Comparative Random Forest pipeline
+│   └── support_vector_machine.joblib # Comparative SVM pipeline
 ├── results/
-│   ├── model_comparison.csv    # Evaluated metric table
-│   ├── confusion_matrices.png  # 2x2 grid of confusion matrices
-│   ├── roc_curves.png          # Discriminative ROC plots
-│   ├── performance_comparison.png # F1, Precision, Recall, Accuracy bar chart
-│   ├── feature_importance.png  # Top feature importances
-│   ├── experiment_summary.json # Comprehensive experiment details
-│   ├── dataset_info.json       # Preprocessing summary
-│   └── best_model.json         # Best model metadata
-└── report/
-    └── report_outline.md       # 10-page academic lab report outline
+│   ├── metrics.json            # Machine-readable test metrics and cross-validation stats
+│   ├── model_comparison.csv    # Comparative performance table
+│   ├── confusion_matrix.csv    # Confusion matrices for all 4 models
+│   └── benchmark_urls_results.json # Benchmark test URL predictions
+├── src/
+│   ├── __init__.py             # Public API exports
+│   ├── data_loader.py          # Data ingestion, schema validation, and deduplication
+│   ├── url_features.py         # URL normalization and 16 pure lexical features
+│   ├── preprocessing.py        # Feature extraction wrapper and stratified splitting
+│   ├── model_pipeline.py       # Pipeline definitions, 5-fold CV, and model trainer
+│   └── prediction.py           # Single-URL inference with probability calibration
+└── tests/
+    ├── __init__.py
+    ├── test_url_normalization.py     # Unit tests for URL canonicalization & malformed input
+    ├── test_feature_consistency.py  # Tests verifying 16 features, ordering, and determinism
+    ├── test_label_mapping.py        # Tests verifying 0=Legitimate, 1=Phishing binary mapping
+    └── test_prediction_pipeline.py  # End-to-end tests & GitHub false-positive regression
 ```
 
 ---
 
-## 6. Faculty Demonstration Checklist (Viva Guide)
-
-Follow this 9-step sequence during project evaluation:
-
-1. **Launch Dashboard**: Open [http://localhost:8501](http://localhost:8501) and explain the 4 model comparison cards and project scope.
-2. **Review Dataset Hygiene**: Open **Dataset Insights**; demonstrate that the raw 2,456 instances contained 740 duplicates which were purged to prevent train/test leakage.
-3. **Review Cleaning & Splitting**: Point out the stratified 80/20 split and that scaling was fitted strictly inside Pipelines (`X_train` only).
-4. **Compare All Four Classifiers**: Open **Model Performance**; present the comparison table and explain why **Random Forest** was selected over KNN, SVM, and Decision Tree.
-5. **Analyze the Confusion Matrix**: Explain the True Positives (173 phishing caught) vs. False Negatives (only 7 missed by Random Forest) and the business cost of false negatives.
-6. **Benchmark Test Fixture (Ground Truth Legitimate)**: In **URL Analyzer & Inspector** -> **Verified Test Record Benchmarks**, select `Verified Held-out Test Sample #1 (Ground Truth: Legitimate)` and run prediction to show correct classification (`1`).
-7. **Benchmark Test Fixture (Ground Truth Phishing)**: Select `Verified Held-out Test Sample #1 (Ground Truth: Phishing)` and run prediction to show correct detection (`-1`).
-8. **Demonstrate URL Lexical Analysis**: In **Live URL Heuristic Analysis**, enter an address (e.g. `http://192.168.1.100/paypal-update/login.php` or `https://www.google.com`), show the 10 extracted address-bar features, and explain why full 30-feature assessment requires active web scraping.
-9. **Show Code Quality & Automated Tests**: Show the terminal running `pytest -v` (58/58 tests passing).
-
----
-
-## 7. Quickstart & Local Installation
+## 7. Installation & Requirements
 
 ### Prerequisites
-- Python 3.10+ (tested on Python 3.14)
+- Python 3.9+ (tested on Python 3.10, 3.11, 3.12, 3.14)
 - Git
 
-### Installation
+### Setup
 ```bash
 # Clone the repository
 git clone https://github.com/tejaskedarpawar/phishguard.git
 cd phishguard
 
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate    # On Windows: venv\Scripts\activate
-
-# Install dependencies
+# Install required dependencies
 pip install -r requirements.txt
 ```
 
-### Reproduce Training & Evaluation
+---
+
+## 8. Command-Line Interface (CLI) Usage
+
+### 1. Analyze a Specific URL Directly
 ```bash
+python main.py --url https://github.com
+```
+
+*Output:*
+```text
+============================================================
+                        PHISHGUARD
+            ML-Based URL Risk Classifier (CLI)
+============================================================
+
+Analyzing: https://github.com
+------------------------------------------------------------
+Normalized URL : https://github.com
+Hostname       : github.com
+Model Result   : Legitimate
+Risk Status    : LOW RISK (Likely Legitimate)
+Confidence     : 93.4% (Phishing: 6.6% | Legit: 93.4%)
+Classifier     : RandomForestClassifier (models/best_model.joblib)
+------------------------------------------------------------
+Lexical Feature Indicators:
+  • URL Length            : 18
+  • Hostname Length       : 10
+  • Dot Count             : 1
+  • Hyphen Count          : 0
+  • Subdomains            : 0
+  • IP Address Used       : No
+  • URL Shortener         : No
+  • Sensitive Keywords    : 0
+------------------------------------------------------------
+Note: This is an ML assessment based on 16 lexical and structural URL attributes. It is not an absolute guarantee of website safety or malice.
+============================================================
+```
+
+### 2. Analyze a Phishing URL Directly
+```bash
+python main.py --url http://192.168.1.100/paypal-update/login.php
+```
+
+*Output:*
+```text
+Model Result   : Phishing
+Risk Status    : HIGH RISK (Potentially Phishing)
+Confidence     : 97.4% (Phishing: 97.4% | Legit: 2.6%)
+Classifier     : RandomForestClassifier (models/best_model.joblib)
+------------------------------------------------------------
+Lexical Feature Indicators:
+  • URL Length            : 44
+  • Hostname Length       : 13
+  • Dot Count             : 4
+  • Hyphen Count          : 1
+  • Subdomains            : 2
+  • IP Address Used       : Yes
+  • URL Shortener         : No
+  • Sensitive Keywords    : 2
+```
+
+### 3. Retrain All Models & Save Pipelines
+```bash
+python main.py --train
+# or
 python train.py
 ```
 
-### Run Automated Tests
+### 4. Run Benchmark URL Evaluation
+```bash
+python main.py --evaluate
+# or
+python evaluate.py
+```
+
+### 5. View Dataset Summary
+```bash
+python main.py --info
+```
+
+### 6. Launch Interactive Menu
+```bash
+python main.py
+```
+
+*Interactive Menu Interface:*
+```text
+============================================================
+                        PHISHGUARD
+            ML-Based URL Risk Classifier (CLI)
+============================================================
+  1. Analyze a URL
+  2. Train the model
+  3. View model evaluation results
+  4. View dataset information
+  5. Exit
+------------------------------------------------------------
+Enter option [1-5]:
+```
+
+---
+
+## 9. Automated Testing Suite
+
+PhishGuard includes a complete automated test suite implemented with `pytest`:
+
 ```bash
 pytest -v
 ```
 
-### Launch Web Application
+### Test Coverage Summary (25 Passing Tests)
+- `tests/test_url_normalization.py` (8 tests):
+  - Empty URL, blank whitespace, and None rejection
+  - Rejection of URLs with embedded whitespace or newlines
+  - Maximum length boundary checks (> 2048 characters)
+  - Scheme prepending (`github.com` -> `https://github.com`)
+  - Case-insensitive scheme and hostname lowercasing
+  - Standard port stripping (80, 443) and custom port retention
+  - Query parameters and fragment preservation
+  - IPv4 address hostnames
+- `tests/test_feature_consistency.py` (7 tests):
+  - Canonical 16 feature names and ordering
+  - List and dictionary alignment
+  - Deterministic feature extraction
+  - Rejection of null, NaN, or infinite feature values
+  - Raw IP address indicator
+  - URL shortener indicator
+  - Sensitive keyword counter
+- `tests/test_label_mapping.py` (4 tests):
+  - Canonical binary encoding (`0 = Legitimate`, `1 = Phishing`)
+  - Dataset label space validation
+  - Dataset summary metrics validation
+  - Security positive class definition
+- `tests/test_prediction_pipeline.py` (6 tests):
+  - Missing model artifact error handling
+  - Malformed URL rejection
+  - **GitHub regression test** (asserting `github.com`, `www.github.com`, `github.com/features`, `docs.github.com` classify as Legitimate)
+  - Top web service classification (`google.com`, `wikipedia.org`, `apple.com`, `stackoverflow.com`, `news.ycombinator.com`)
+  - Real phishing attack detection (`192.168.1.100`, spoofing keywords, brand subdomains, shorteners)
+  - Response dictionary schema contract
+
+---
+
+## 10. College Lab Demonstration & Viva Guide
+
+Use this sequence for your laboratory viva or project presentation:
+
 ```bash
-streamlit run app.py
+# Step 1: Run automated tests to prove code stability and absence of regressions
+pytest -v
+
+# Step 2: Show dataset information and balance
+python main.py --info
+
+# Step 3: Run model training (demonstrating 5-fold CV and comparative model training)
+python main.py --train
+
+# Step 4: Run benchmark evaluation (demonstrating GitHub passing and phishing caught)
+python main.py --evaluate
+
+# Step 5: Test GitHub live via CLI (proves fix without whitelisting)
+python main.py --url https://github.com
+
+# Step 6: Test a known phishing attack live via CLI
+python main.py --url http://192.168.1.100/paypal-update/login.php
 ```
 
+### Common Viva Questions & Model Answers
+
+**Q1: Why did your original system classify `github.com` as phishing?**
+> *Answer*: The previous system had a feature space mismatch. It was trained on the UCI dataset which required 30 features (including HTML DOM and DNS attributes). At runtime, raw URLs only provided 10 address-bar features, and the missing 20 features were arbitrarily imputed with `1`. In the UCI dataset, `1` on those features correlated with over 90% phishing prevalence, forcing all URLs into the phishing cluster. Additionally, legitimate training samples lacked path diversity, biasing decision trees against shallow paths. We resolved both issues by engineering 16 pure lexical features extracted consistently in training and inference and training on a balanced, path-diverse dataset.
+
+**Q2: Did you whitelist `github.com` to make it pass?**
+> *Answer*: No. Whitelisting is an anti-pattern in machine learning. `github.com` and all benchmark domains were strictly excluded from the training dataset. Its Legitimate classification is an honest prediction derived purely from the Random Forest model's decision tree thresholds across the 16 lexical features.
+
+**Q3: Why did you select Random Forest over SVM, Decision Tree, and KNN?**
+> *Answer*: In cybersecurity, the cost of a False Negative (missing a phishing site) is far higher than a False Positive. Random Forest achieved the highest F1-Score (0.9386) and ROC-AUC (0.9807) on the held-out test set, with a False Negative Rate of only 7.5% compared to 12.2% for Decision Tree and 12.3% for KNN. Its ensemble averaging also reduces variance on complex URLs.
+
+**Q4: How do you prevent data leakage during preprocessing?**
+> *Answer*: We perform an 80/20 stratified split *before* fitting any preprocessing transformations. The `StandardScaler` used by KNN and SVM is wrapped inside a Scikit-Learn `Pipeline`, ensuring scaling parameters ($\mu, \sigma$) are computed solely on `X_train`.
+
 ---
 
-## 8. Limitations & Scope
+## 11. Known Limitations & Ethical Considerations
 
-1. **Lexical vs. Full-Page Detection**: Only 10 of the 30 features are derivable from the raw URL string without active crawling. For zero-risk offline demonstration, the live URL analyzer extracts these 10 lexical features and holds page-content features at neutral baseline.
-2. **No Live Scraping**: To maintain user privacy, security, and offline reliability, the application does not visit or execute untrusted URLs.
-3. **Temporal Drift**: The UCI dataset was published in 2015. Modern attacks utilizing novel homoglyphs or multi-stage redirections require retraining on newer threat intelligence feeds.
-
----
-
-## 9. License
-
-This project is licensed under the MIT License. The dataset is provided by the UCI Machine Learning Repository under the Creative Commons Attribution 4.0 International (CC BY 4.0) license.
+1. **Pure Lexical Analysis Scope**: PhishGuard evaluates URLs purely from their string structure. A compromised legitimate website hosting malicious content under a normal URL path may appear legitimate until reputation lists or content scanners flag it.
+2. **Obfuscated Shorteners**: While PhishGuard detects shortener domains (`bit.ly`, `tinyurl.com`), resolving the destination domain requires an HTTP HEAD request, which is intentionally avoided to preserve zero-latency offline security.
+3. **Defense-in-Depth**: Machine learning URL classifiers should be deployed as one layer in a multi-tier defense architecture, complementing DNS filtering, SPF/DKIM verification, and user security awareness training.
