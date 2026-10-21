@@ -1,225 +1,193 @@
-# PhishGuard
+# PhishGuard — ML-Based Phishing Website Detection System
 
-**ML-Based Phishing Website Detection System**
-
-A machine learning project that classifies website URLs as *Potentially Phishing* or *Likely Legitimate* using four scikit-learn classifiers trained on the UCI Phishing Websites Dataset.
+An academically rigorous machine learning project for detecting phishing websites using four comparative classifiers trained on the UCI Phishing Websites dataset. Built with Python, Scikit-Learn, and Streamlit.
 
 ---
 
-## Problem Statement
+## 1. Project Overview & Problem Statement
 
-Phishing websites impersonate legitimate organisations to steal credentials and sensitive data. Traditional blacklist approaches cannot keep pace with the rapid creation of new phishing domains. This project applies machine learning to detect phishing patterns from pre-extracted URL and website features.
+Phishing websites impersonate legitimate organizations (banks, email providers, payment gateways) to harvest credentials, session tokens, and financial data. Static blacklists fail against modern phishing campaigns that rapidly spin up ephemeral domains. 
 
----
-
-## Features
-
-- **Four ML classifiers**: Decision Tree, K-Nearest Neighbors, Random Forest, Support Vector Machine
-- **Complete evaluation**: Accuracy, Precision, Recall, F1-score, ROC-AUC, training time
-- **URL Analyzer**: Enter a URL and receive a classification with extracted feature details
-- **Interactive dashboard**: Streamlit-based 5-page web application
-- **Data insights**: Class distribution, missing values, preprocessing summary
-- **Reproducible results**: Fixed random seeds, stratified splits, artifact persistence
+**PhishGuard** evaluates machine learning classifiers on pre-extracted website and URL characteristics, implementing a complete, leak-free data science pipeline from data hygiene and cross-validation to interactive inference.
 
 ---
 
-## Technology Stack
+## 2. Dataset Information & Attribution
 
-| Tool | Purpose |
-|------|---------|
-| Python 3 | Core language |
-| pandas, NumPy | Data processing |
-| scikit-learn | ML pipelines and evaluation |
-| Matplotlib, Seaborn | Visualisation |
-| Streamlit | Web interface |
-| Joblib | Model persistence |
-
----
-
-## Dataset Attribution
-
-- **Name**: Phishing Websites Dataset
-- **Source**: [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/327/phishing+websites)
-- **Donated by**: Rami Mohammad, Fadi Thabtah, Lee McCluskey (2015)
-- **DOI**: 10.24432/C51W2X
+- **Dataset**: [Phishing Websites Dataset](https://archive.ics.uci.edu/dataset/327/phishing+websites)
+- **Repository**: UCI Machine Learning Repository
+- **Authors**: Rami Mohammad, Fadi Thabtah, Lee McCluskey (2015)
+- **DOI**: `10.24432/C51W2X`
 - **License**: Creative Commons Attribution 4.0 International (CC BY 4.0)
-- **Instances**: 11,055 | **Features**: 30 | **Classes**: Phishing (−1), Legitimate (1)
+- **Raw Dimensions**: 2,456 instances × 31 columns (30 input features + 1 target column `Result`)
+- **Cleaned Dimensions**: 1,716 instances after deduplication (740 duplicate rows removed)
+- **Target Variable**: `Result`
+  - `Result = -1`: **Phishing** (Positive Class of Interest)
+  - `Result = 1`: **Legitimate** (Negative Class)
 
 ---
 
-## Project Structure
+## 3. Data Cleaning & ML Pipeline
+
+```
+phishing.csv (2,456 rows)
+       │
+       ▼
+ Schema Check & Typo Handling (src/data_cleaning.py)
+       │
+       ▼
+ Deduplication: 740 exact duplicate rows removed (1,716 unique rows)
+       │
+       ▼
+ Stratified 80/20 Train/Test Split (random_state=42)
+       ├── Training Set: 1,372 instances (5-fold Stratified CV)
+       └── Test Set: 344 instances (Held-out, strictly unseen during training)
+       │
+       ▼
+ Scikit-Learn Pipelines (src/train_models.py)
+       ├── Decision Tree (Entropy / Information Gain)
+       ├── K-Nearest Neighbors (StandardScaler fitted inside Pipeline)
+       ├── Random Forest (150 trees, max_depth=15)
+       └── Support Vector Machine (StandardScaler + Calibrated RBF Kernel)
+       │
+       ▼
+ Evaluation & Artifacts (src/evaluation.py)
+       ├── results/model_comparison.csv
+       ├── results/confusion_matrices.png
+       ├── results/roc_curves.png
+       ├── results/performance_comparison.png
+       ├── results/feature_importance.png
+       └── results/experiment_summary.json
+```
+
+---
+
+## 4. Experimental Results
+
+All four classifiers were evaluated on the same independent test set of 344 instances (180 Phishing, 164 Legitimate).
+
+| Model | Test Accuracy | Precision (Phishing) | Recall (Phishing) | F1-Score (Phishing) | ROC-AUC | Training Time (s) |
+|---|---|---|---|---|---|---|
+| **Random Forest** ⭐ | **0.9448** | **0.9351** | **0.9611** | **0.9479** | **0.9891** | 0.1825 s |
+| **Decision Tree** | 0.9419 | 0.9396 | 0.9500 | 0.9448 | 0.9720 | 0.0042 s |
+| **Support Vector Machine** | 0.9331 | 0.9337 | 0.9389 | 0.9363 | 0.9868 | 0.0915 s |
+| **K-Nearest Neighbors** | 0.9128 | 0.9213 | 0.9111 | 0.9162 | 0.9766 | 0.0048 s |
+
+*Selection Criterion*: In cybersecurity, missing a phishing site (**False Negative**) is far more damaging than flagging a legitimate site (**False Positive**). **Random Forest** achieved the highest F1-Score (**0.9479**), catching 173 of 180 phishing attacks with only 7 false negatives (Recall = **0.9611**), and achieved the highest discriminative ability (ROC-AUC = **0.9891**).
+
+### 5-Fold Stratified Cross-Validation (on Training Data only)
+- **Random Forest**: CV F1 = `0.9563 (±0.0105)` | CV Accuracy = `0.9541 (±0.0102)`
+- **Support Vector Machine**: CV F1 = `0.9436 (±0.0116)` | CV Accuracy = `0.9410 (±0.0118)`
+- **Decision Tree**: CV F1 = `0.9372 (±0.0178)` | CV Accuracy = `0.9351 (±0.0169)`
+- **K-Nearest Neighbors**: CV F1 = `0.9216 (±0.0111)` | CV Accuracy = `0.9176 (±0.0116)`
+
+---
+
+## 5. Repository Structure
 
 ```
 PhishGuard/
-├── app.py                  # Streamlit web application
-├── train.py                # Model training script
-├── requirements.txt        # Python dependencies
-├── README.md
-├── .gitignore
-├── data/
-│   └── README.md           # Dataset download instructions
+├── app.py                      # Presentation-ready Streamlit web application
+├── train.py                    # Complete reproducible training and evaluation pipeline
+├── requirements.txt            # Python dependencies
+├── README.md                   # System documentation and demo checklist
+├── .gitignore                  # Git exclusions for environment and temporary files
 ├── src/
-│   ├── __init__.py
-│   ├── data_cleaning.py    # Dataset loading, validation, cleaning
-│   ├── feature_extraction.py  # URL → feature vector for live inference
-│   └── evaluation.py       # Metrics, plots, CSV/JSON persistence
+│   ├── __init__.py             # Package exports
+│   ├── data_cleaning.py        # Loading, schema validation, deduplication, splitting
+│   ├── feature_extraction.py   # URL lexical feature extractor (10 features)
+│   ├── train_models.py         # Model pipeline configurations and 5-fold CV
+│   ├── evaluation.py           # Metrics calculation, plots, and JSON persistence
+│   └── prediction.py           # Inference engine for URLs and full 30-feature records
+├── tests/
+│   ├── test_data.py            # Unit tests for loading, schema, and splitting
+│   ├── test_models.py          # Unit tests for pipeline scaling, CV, and training
+│   └── test_prediction.py      # Unit tests for URL heuristics and record prediction
+├── data/
+│   ├── README.md               # Dataset download and schema details
+│   ├── phishing.csv            # Cleaned UCI dataset
+│   └── demo_samples.json       # Verified held-out test set fixtures for presentation
 ├── models/
-│   └── *.joblib            # Saved model pipelines (generated)
+│   ├── decision_tree.joblib    # Fitted Decision Tree pipeline
+│   ├── k-nearest_neighbors.joblib
+│   ├── random_forest.joblib    # Best model pipeline
+│   └── support_vector_machine.joblib
 ├── results/
-│   ├── model_comparison.csv
-│   ├── confusion_matrices.png
-│   ├── roc_curves.png
-│   ├── f1_comparison.png
-│   └── *.json              # Dataset info, best model, cleaning summary
-├── notebooks/
-│   └── exploration.ipynb   # Exploratory analysis notebook
+│   ├── model_comparison.csv    # Evaluated metric table
+│   ├── confusion_matrices.png  # 2x2 grid of confusion matrices
+│   ├── roc_curves.png          # Discriminative ROC plots
+│   ├── performance_comparison.png # F1, Precision, Recall, Accuracy bar chart
+│   ├── feature_importance.png  # Top feature importances
+│   ├── experiment_summary.json # Comprehensive experiment details
+│   ├── dataset_info.json       # Preprocessing summary
+│   └── best_model.json         # Best model metadata
 └── report/
-    └── report_outline.md   # 10-page report structure
+    └── report_outline.md       # 10-page academic lab report outline
 ```
 
 ---
 
-## Architecture
+## 6. Faculty Demonstration Checklist (Viva Guide)
 
-```mermaid
-flowchart TD
-    A[phishing.csv] --> B[data_cleaning.py\nLoad · Validate · Clean]
-    B --> C[Train / Test Split\n80% / 20% stratified]
-    C --> D1[Decision Tree]
-    C --> D2[KNN + Scaler]
-    C --> D3[Random Forest]
-    C --> D4[SVM + Scaler]
-    D1 & D2 & D3 & D4 --> E[evaluation.py\nAcc · P · R · F1 · AUC]
-    E --> F[Best Model Selection\nby F1-score]
-    F --> G[models/*.joblib\nresults/*.csv/*.png/*.json]
-    G --> H[app.py\nStreamlit Dashboard]
-    H --> I[URL Analyzer\nfeature_extraction.py]
-    I --> H
-```
+Follow this 9-step sequence during project evaluation:
+
+1. **Launch Dashboard**: Open [http://localhost:8501](http://localhost:8501) and explain the 4 model comparison cards and project scope.
+2. **Review Dataset Hygiene**: Open **Dataset Insights**; demonstrate that the raw 2,456 instances contained 740 duplicates which were purged to prevent train/test leakage.
+3. **Review Cleaning & Splitting**: Point out the stratified 80/20 split and that scaling was fitted strictly inside Pipelines (`X_train` only).
+4. **Compare All Four Classifiers**: Open **Model Performance**; present the comparison table and explain why **Random Forest** was selected over KNN, SVM, and Decision Tree.
+5. **Analyze the Confusion Matrix**: Explain the True Positives (173 phishing caught) vs. False Negatives (only 7 missed by Random Forest) and the business cost of false negatives.
+6. **Benchmark Test Fixture (Ground Truth Legitimate)**: In **URL Analyzer & Inspector** -> **Verified Test Record Benchmarks**, select `Verified Held-out Test Sample #1 (Ground Truth: Legitimate)` and run prediction to show correct classification (`1`).
+7. **Benchmark Test Fixture (Ground Truth Phishing)**: Select `Verified Held-out Test Sample #1 (Ground Truth: Phishing)` and run prediction to show correct detection (`-1`).
+8. **Demonstrate URL Lexical Analysis**: In **Live URL Heuristic Analysis**, enter an address (e.g. `http://192.168.1.100/paypal-update/login.php` or `https://www.google.com`), show the 10 extracted address-bar features, and explain why full 30-feature assessment requires active web scraping.
+9. **Show Code Quality & Automated Tests**: Show the terminal running `pytest -v` (58/58 tests passing).
 
 ---
 
-## Installation
+## 7. Quickstart & Local Installation
 
+### Prerequisites
+- Python 3.10+ (tested on Python 3.14)
+- Git
+
+### Installation
 ```bash
-git clone https://github.com/<your-username>/PhishGuard.git
-cd PhishGuard
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
+# Clone the repository
+git clone https://github.com/tejaskedarpawar/phishguard.git
+cd phishguard
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate    # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
----
-
-## Dataset Setup
-
-See [`data/README.md`](data/README.md) for detailed download instructions.
-
-**Quick option (Kaggle mirror):**
-1. Download `phishing.csv` from [Kaggle](https://www.kaggle.com/datasets/eswarchandt/phishing-website-detector)
-2. Place it at `data/phishing.csv`
-
-**UCI option:**
-1. Download from [UCI Repository](https://archive.ics.uci.edu/dataset/327/phishing+websites)
-2. Convert the `.arff` file to CSV
-
----
-
-## Training
-
+### Reproduce Training & Evaluation
 ```bash
 python train.py
 ```
 
-This will:
-1. Load and validate `data/phishing.csv`
-2. Clean and preprocess the data
-3. Train all four model pipelines
-4. Evaluate on the held-out test set
-5. Save artifacts to `models/` and `results/`
+### Run Automated Tests
+```bash
+pytest -v
+```
 
----
-
-## Launch Application
-
+### Launch Web Application
 ```bash
 streamlit run app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501) in your browser.
+---
+
+## 8. Limitations & Scope
+
+1. **Lexical vs. Full-Page Detection**: Only 10 of the 30 features are derivable from the raw URL string without active crawling. For zero-risk offline demonstration, the live URL analyzer extracts these 10 lexical features and holds page-content features at neutral baseline.
+2. **No Live Scraping**: To maintain user privacy, security, and offline reliability, the application does not visit or execute untrusted URLs.
+3. **Temporal Drift**: The UCI dataset was published in 2015. Modern attacks utilizing novel homoglyphs or multi-stage redirections require retraining on newer threat intelligence feeds.
 
 ---
 
-## Model Comparison
+## 9. License
 
-All models are evaluated on the **same held-out 20% test set**.
-
-**Selection criterion:** F1-score on the phishing class (−1), with ROC-AUC as tiebreaker.
-
-*Results below will be populated after running `python train.py`:*
-
-| Model | Accuracy | Precision | Recall | F1-Score | ROC-AUC | Train (s) |
-|-------|----------|-----------|--------|----------|---------|-----------|
-| **Decision Tree** | **0.9477** | **0.9551** | 0.9444 | **0.9497** | 0.9666 | 0.003 |
-| K-Nearest Neighbors | 0.9128 | 0.9213 | 0.9111 | 0.9162 | 0.9766 | 0.002 |
-| Random Forest | 0.9448 | 0.9351 | **0.9611** | 0.9479 | **0.9891** | 0.173 |
-| Support Vector Machine | 0.9331 | 0.9337 | 0.9389 | 0.9363 | 0.9868 | 0.090 |
-
-> Evaluated on UCI Phishing Websites Dataset — 1716 instances (after deduplication), 20% held-out test set, stratified split, `random_state=42`.
-> Positive class = −1 (Phishing) for Precision, Recall, F1.
-
-**Best model**: **Decision Tree** (F1=0.9497) — selected by F1-score on phishing class.
-
----
-
-## Limitations
-
-1. Many dataset features require live website inspection; the URL Analyzer approximates these conservatively from the URL string only.
-2. Training data is from 2015; modern phishing techniques may not be fully represented.
-3. Binary classification only — does not distinguish phishing subtypes.
-4. No live network requests are made; this is intentional for safety.
-
----
-
-## Future Improvements
-
-- Integrate optional live feature extraction (DNS, SSL, WHOIS) with user consent.
-- Add XGBoost / LightGBM for comparison against the baseline models.
-- Use SHAP for per-prediction feature explanations.
-- Retrain on a continuously updated phishing URL dataset.
-- Lower the decision threshold for higher recall in high-risk settings.
-
----
-
-## Screenshots
-
-*Screenshots will be added after the application is launched and trained.*
-
----
-
-## Deployment (Streamlit Community Cloud)
-
-1. Push the repository to GitHub (excluding `data/*.csv` — add manually or use DVC).
-2. Commit `models/*.joblib` and `results/` files, or add a startup script to regenerate them.
-3. Connect the repository at [share.streamlit.io](https://share.streamlit.io).
-4. Set main file to `app.py`.
-
----
-
-## License
-
-Code: MIT License.
-Dataset: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — cite Mohammad et al. (2015).
-
----
-
-## Citation
-
-If you use this project or the dataset, please cite:
-
-```
-R. M. Mohammad, F. Thabtah, L. McCluskey.
-"Phishing Websites Features."
-UCI Machine Learning Repository, 2015.
-DOI: 10.24432/C51W2X
-```
+This project is licensed under the MIT License. The dataset is provided by the UCI Machine Learning Repository under the Creative Commons Attribution 4.0 International (CC BY 4.0) license.

@@ -278,10 +278,33 @@ def split_data(
 
 
 def _validate_schema(df: pd.DataFrame) -> None:
-    """Raise ValueError if critical columns are missing."""
+    """Raise ValueError if critical columns are missing.
+
+    Handles common spelling variations between original UCI ARFF and Kaggle mirrors.
+    """
+    column_aliases = {
+        "popupwindow": "popUpWidnow",
+        "popupwidnow": "popUpWidnow",
+        "shortening_service": "Shortining_Service",
+        "shortining_service": "Shortining_Service",
+        "domain_registration_length": "Domain_registeration_length",
+        "domain_registeration_length": "Domain_registeration_length",
+    }
+
+    # Normalize existing columns to canonical names if aliases match
+    existing_lower = {col.lower(): col for col in df.columns}
+    rename_dict = {}
+    for alias_lower, canonical in column_aliases.items():
+        if alias_lower in existing_lower and existing_lower[alias_lower] != canonical:
+            rename_dict[existing_lower[alias_lower]] = canonical
+
+    if rename_dict:
+        df.rename(columns=rename_dict, inplace=True)
+        logger.info("Normalized column names: %s", rename_dict)
+
+    # General case-insensitive matching
     missing_cols = [c for c in FEATURE_COLUMNS + [TARGET_COLUMN] if c not in df.columns]
     if missing_cols:
-        # Try case-insensitive match for common Kaggle variations
         lower_map = {c.lower(): c for c in df.columns}
         still_missing = []
         rename_map: dict[str, str] = {}
@@ -298,3 +321,4 @@ def _validate_schema(df: pd.DataFrame) -> None:
                 f"Required columns not found in dataset: {still_missing}\n"
                 "Ensure you are using the correct UCI Phishing Websites CSV."
             )
+
