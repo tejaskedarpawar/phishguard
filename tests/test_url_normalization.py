@@ -80,3 +80,42 @@ class TestUrlNormalization:
         is_valid, norm, _ = normalize_url("http://192.168.1.1:8000/login.php")
         assert is_valid
         assert norm == "http://192.168.1.1:8000/login.php"
+
+    def test_defanged_threat_intel_urls(self) -> None:
+        """Refang hxxp, hxxps, [.], and [:] indicators."""
+        is_valid, norm, _ = normalize_url("hxxps://malicious-domain[.]xyz/verify")
+        assert is_valid
+        assert norm == "https://malicious-domain.xyz/verify"
+
+        is_valid, norm, _ = normalize_url("hxxp[:]//192.168.1.1/login")
+        assert is_valid
+        assert norm == "http://192.168.1.1/login"
+
+    def test_quoted_and_bracketed_urls(self) -> None:
+        """Clean quotes, angle brackets, and trailing sentence punctuation."""
+        is_valid, norm, _ = normalize_url('"https://github.com"')
+        assert is_valid
+        assert norm == "https://github.com"
+
+        is_valid, norm, _ = normalize_url("<https://www.github.com/features.>")
+        assert is_valid
+        assert norm == "https://www.github.com/features"
+
+    def test_subpath_trailing_slash_normalization(self) -> None:
+        """Trailing slashes on sub-paths must be normalized consistently."""
+        is_valid, norm, _ = normalize_url("https://www.python.org/downloads/")
+        assert is_valid
+        assert norm == "https://www.python.org/downloads"
+
+    def test_unsupported_schemes_rejection(self) -> None:
+        """Reject non-web schemes like javascript: or data:."""
+        is_valid, _, err = normalize_url("javascript:alert(1)")
+        assert not is_valid
+        assert "unsupported protocol" in err.lower()
+
+    def test_internationalized_domain_names(self) -> None:
+        """Unicode IDN domains must convert to punycode cleanly."""
+        is_valid, norm, _ = normalize_url("https://яндекс.рф/search")
+        assert is_valid
+        assert "xn--" in norm
+

@@ -51,14 +51,17 @@ SENSITIVE_KEYWORDS = {
 
 
 def normalize_url(raw_url: str) -> Tuple[bool, str, str]:
-    """Validate and normalize a user-supplied URL.
+    """Validate and normalize any user-supplied URL.
 
-    Normalization steps:
-    1. Strip leading and trailing whitespace.
-    2. Check length and reject empty or excessively long inputs (> 2048 chars).
-    3. Ensure a valid scheme is present (defaults to 'https://' if omitted).
-    4. Lowercase the scheme and hostname.
-    5. Validate parseability of the hostname.
+    Handles:
+    - Raw domains without scheme (github.com -> https://github.com)
+    - Surrounding quotes, angle brackets, parentheses, or markdown syntax
+    - Defanged threat intel feeds (hxxp://, hxxps://, [.], [:])
+    - Trailing sentence punctuation (periods, commas, semicolons)
+    - Internationalized Domain Names (IDN / punycode)
+    - Custom ports, userinfo, queries, and fragments
+    - Path normalization (removes redundant trailing slashes on sub-paths)
+    - Rejects unsupported schemes (javascript:, data:, etc.) and internal whitespace
 
     Returns
     -------
@@ -71,14 +74,37 @@ def normalize_url(raw_url: str) -> Tuple[bool, str, str]:
     if not url:
         return False, "", "URL cannot be blank or whitespace only."
 
+    # 1. Strip surrounding quotes, angle brackets, braces, and parentheses
+    url = url.strip("\"'`<>(){}[]")
+
+    # 2. Extract URL if wrapped in markdown link syntax [text](url)
+    md_match = re.match(r"^\[.*?\]\((https?://.*?)\)$", url, flags=re.IGNORECASE)
+    if md_match:
+        url = md_match.group(1).strip()
+
+    # 3. Refang defanged threat intelligence URLs (e.g. hxxp://, [.], [:])
+    url = url.replace("[.]", ".").replace("[:]", ":")
+    if re.match(r"^hxxps?://", url, flags=re.IGNORECASE):
+        url = re.sub(r"^hxxps://", "https://", url, flags=re.IGNORECASE)
+        url = re.sub(r"^hxxp://", "http://", url, flags=re.IGNORECASE)
+
+    # 4. Strip trailing punctuation commonly picked up from sentences (e.g. "https://github.com.")
+    url = re.sub(r"[\.,;:!?]+$", "", url)
+
+    # 5. Length boundary check
     if len(url) > 2048:
         return False, "", "URL exceeds maximum permitted length (2048 characters)."
 
-    # Reject obvious non-URL strings containing spaces or newlines
+    # 6. Reject unsupported non-web protocols
+    for unsupp in ("javascript:", "data:", "file:", "vbscript:", "mailto:", "tel:", "sms:"):
+        if url.lower().startswith(unsupp):
+            return False, "", f"Unsupported protocol '{unsupp}'. PhishGuard analyzes web URLs (HTTP/HTTPS)."
+
+    # 7. Reject invalid internal whitespace
     if any(ws in url for ws in (" ", "\t", "\n", "\r")):
         return False, "", "URL contains invalid whitespace characters."
 
-    # Prepend scheme if missing for uniform parsing (case-insensitive check)
+    # 8. Ensure scheme is present (defaults to https://)
     lower_check = url.lower()
     if not (lower_check.startswith("http://") or lower_check.startswith("https://")):
         url = "https://" + url
@@ -89,12 +115,29 @@ def normalize_url(raw_url: str) -> Tuple[bool, str, str]:
         if not hostname:
             return False, "", "Could not parse a valid hostname from the URL."
 
+        # Handle IDN / Unicode domains safely via Punycode
+        try:
+            hostname_ascii = hostname.encode("idna").decode("ascii").lower()
+        except Exception:
+            hostname_ascii = hostname.lower()
+
+        # Reconstruct userinfo if present in netloc (preserves @ symbol for phishing indicators)
+        userinfo = ""
+        if "@" in parsed.netloc:
+            user_part = parsed.netloc.split("@")[0]
+            userinfo = f"{user_part}@"
+
+        # Canonicalize path: strip redundant trailing slashes on sub-paths (/downloads/ -> /downloads)
+        clean_path = parsed.path or ""
+        if clean_path and clean_path != "/" and clean_path.endswith("/"):
+            clean_path = clean_path.rstrip("/")
+
         # Reconstruct canonical normalized URL
-        normalized = f"{parsed.scheme.lower()}://{hostname.lower()}"
+        normalized = f"{parsed.scheme.lower()}://{userinfo}{hostname_ascii}"
         if parsed.port and parsed.port not in (80, 443):
             normalized += f":{parsed.port}"
-        if parsed.path:
-            normalized += parsed.path
+        if clean_path:
+            normalized += clean_path
         if parsed.query:
             normalized += f"?{parsed.query}"
         if parsed.fragment:
